@@ -7,18 +7,19 @@
     <generator>Hugo -- gohugo.io</generator>
     <language>en-US</language>
     <copyright>Copyright © 2015 Jian Chen</copyright>
-    <lastBuildDate>Wed, 26 Apr 2017 14:14:44 +0800</lastBuildDate>
+    <lastBuildDate>Tue, 05 Sep 2017 14:14:44 +0800</lastBuildDate>
     
 	<atom:link href="https://jianchen2580.github.io/post/index.xml" rel="self" type="application/rss+xml" />
     
     
     <item>
-      <title>good to great</title>
-      <link>https://jianchen2580.github.io/post/good-to-great/</link>
-      <pubDate>Wed, 26 Apr 2017 14:14:44 +0800</pubDate>
+      <title>Systemd and docker container</title>
+      <link>https://jianchen2580.github.io/post/use-systemd-with-container/</link>
+      <pubDate>Tue, 05 Sep 2017 14:14:44 +0800</pubDate>
       
-      <guid>https://jianchen2580.github.io/post/good-to-great/</guid>
-      <description></description>
+      <guid>https://jianchen2580.github.io/post/use-systemd-with-container/</guid>
+      <description>One of my docker host run several containers, e.g. Redis and Nginx, and a manually start container is needed when the host is rebooted. Systemd is ideally to handle such service, but it’s not idea that write systemd script per container. However, a feature in systemd is the template unit file, which can help to resolve such cases.
+What are template unit files? Template unit files allow systemd to address multiple units from a single configuration file.</description>
     </item>
     
   </channel>

@@ -13,7 +13,7 @@
 
     <meta property="twitter:site" content="@jianchen2580">
 
-<meta property="twitter:title" content="Post">
+<meta property="twitter:title" content="Systemd and docker container">
 
     <meta property="twitter:card" content="summary_large_image">
     <meta property="twitter:image" content="https://jianchen2580.github.io/img/banner.png">
@@ -23,10 +23,10 @@
 <title>
 
 
-     Jian Chen - Post 
+     Jian Chen - Systemd and docker container 
 
 </title>
-<link rel="canonical" href="https://jianchen2580.github.io/post/">
+<link rel="canonical" href="https://jianchen2580.github.io/post/use-systemd-with-container/">
 
 
 <style media="screen">
@@ -964,8 +964,6 @@ section.main .content .markdown pre, section.main .content .markdown pre code {
 
 
 
-  <link href="https://jianchen2580.github.io/post/index.xml" rel="alternate" type="application/rss+xml" title="Jian Chen" />
-
 
 </head>
 
@@ -973,7 +971,7 @@ section.main .content .markdown pre, section.main .content .markdown pre code {
 <body>
 
 
-<section class="header header-home">
+<section class="header">
 
     <div class="container">
         <a href="https://jianchen2580.github.io/"><img class="logo" src="https://jianchen2580.github.io/img/avatar.png" alt="logo" /></a>
@@ -999,27 +997,96 @@ section.main .content .markdown pre, section.main .content .markdown pre code {
 <section class="main">
     <div class="container">
         <div class="content">
-            
+            <div class="page-heading">
+
+    Systemd and docker container
+
+</div>
+
             <div class="markdown">
                 
-                    
-                
-            </div>
-            <div class="posts">
-            
-                <div class="page-heading">Post</div>
-                <ul>
-                    
-                        
-                            <li class="post-item">
-    <span class="meta">Sep 5, 2017</span>
-    <a href="https://jianchen2580.github.io/post/use-systemd-with-container/"><span>Systemd and docker container</span></a>
-</li>
+    
+    
 
-                        
-                    
-                </ul>
-            
+<p>One of my docker host run several containers, e.g. Redis and Nginx, and a manually start container is needed when the host is rebooted. Systemd is ideally to handle such service, but it’s not idea that write systemd  script per container.
+However, a feature in systemd is the template unit file, which can help to resolve such cases.</p>
+
+<p>What are template unit files?
+Template unit files allow systemd to address multiple units from a single configuration file. You can call a systemd template unit file using a special format to use this feature:</p>
+
+<pre><code>&lt;service_name&gt;@&lt;argument&gt;.service
+</code></pre>
+
+<p>The argument is a string passed to systemd to use in the unit file. The argument can be used to customize the way systemd deals with that specific instance of the unit. Multiple instances of the same unit can exist.
+Two identifiers are used in the unit file for passing the instance argument.</p>
+
+<ul>
+<li>%i passes the argument, specially formatted (escaped)</li>
+<li>%I passes the argument verbatim without escaping</li>
+</ul>
+
+<p>Escaping formats the identifier with special rules before using it. Characters that would otherwise break file names are substituted.</p>
+
+<h2 id="real-world-examples">Real world examples</h2>
+
+<p>Redis and Nginx, for example, uses template unit files to allow multiple instances using the same unit file. Here is the unit file for reference /etc/systemd/system/containers@.service:</p>
+
+<pre><code>[Unit]
+Description=Service %I in container
+After=docker.service # container should after docker service
+Requires=docker.service
+
+[Service]
+Restart=always
+ExecStart=/usr/bin/docker start -a %i
+ExecStop=/usr/bin/docker stop %i
+TimeoutStopSec=1m
+
+[Install]
+WantedBy=default.target
+</code></pre>
+
+<p>Here, you can see the escaped argument %i used anywhere a filename is called. The unescaped argument %I is used in the description to be more human readable.</p>
+
+<p>This setup allows you to call containers@redis.service to launch a container named redis.
+Create container redis and stop:</p>
+
+<pre><code>[root@localhost system]# docker run --name redis -d redis
+7cef4880c0821d444a3f5d2604194557247d23592c07056a24243f1220    66674e
+[root@localhost system]# docker stop 2dc16ae209dc
+</code></pre>
+
+<p>Launch container redis via systemctl</p>
+
+<pre><code>[root@localhost system]# systemctl stop containers@redis.service
+[root@localhost system]# docker ps
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+[root@localhost system]# systemctl start containers@redis.service
+[root@localhost system]# docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                   NAMES
+7cef4880c082        redis               &quot;docker-entrypoint.sh&quot;   3 minutes ago        Up 3 seconds        6379/tcp                redis
+</code></pre>
+
+<p>Using the above configuration, we can launch many containers from the single template configuration file. For instance:</p>
+
+<pre><code>[root@localhost system]# docker run --name mysql -e MYSQL_ROOT_PASSWORD=changeme -d mysql:5.7
+172b6cd19241f94d3d88d14b01501c6abe515c336a2cfa6e486733846e7f3a18
+[root@localhost system]# docker stop mysql
+mysql
+[root@localhost system]# systemctl start containers@mysql.service
+[root@localhost system]# docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+172b6cd19241        mysql:5.7           &quot;docker-entrypoint.sh&quot;   35 seconds ago      Up 3 seconds        3306/tcp            mysql
+7cef4880c082        redis               &quot;docker-entrypoint.sh&quot;   15 minutes ago      Up 12 minutes       6379/tcp            redis
+[root@localhost system]# systemctl stop  containers@mysql.service
+[root@localhost system]# docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+7cef4880c082        redis               &quot;docker-entrypoint.sh&quot;   15 minutes ago      Up 12 minutes       6379/tcp            redis
+</code></pre>
+
+<p>This feature is useful since your containers can launched by systems when host reboot without writing systemd script for each containers .</p>
+
+
             </div>
         </div>
     </div>

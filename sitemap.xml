@@ -3,6 +3,11 @@
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   
   <url>
+    <loc>https://jianchen2580.github.io/post/infrastructure-as-code/</loc>
+    <lastmod>2017-09-05T14:14:44+08:00</lastmod>
+  </url>
+  
+  <url>
     <loc>https://jianchen2580.github.io/post/use-systemd-with-container/</loc>
     <lastmod>2017-09-05T14:14:44+08:00</lastmod>
   </url>

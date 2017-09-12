@@ -18,7 +18,12 @@
       <pubDate>Tue, 05 Sep 2017 14:14:44 +0800</pubDate>
       
       <guid>https://jianchen2580.github.io/post/infrastructure-as-code/</guid>
-      <description></description>
+      <description>基础设施即代码
+ 自动化基础设施provisioning和deployment process 通过code描述而非大神的记忆 Version Control/Git, Code的变更可追溯，可回滚 Code Review和自动化测试部署 透明度  协作与共享
+ 代码可以通过GIT等版本管理工具在运维团队中共享和协作 基础设施演进 审计和跟踪基础设施的变化, 例如：AWS Security Group／Firewall, AMI/image 自动化 自动化所有可变更的操作  三个阶段：
+ Write：INFRASTRUCTURE AS CODE Review: Review changes before applying Apply: REPRODUCIBLE INFRASTRUCTURE  基础设施即代码的实践涉及的tools：
+ Terraform：数据中心provision Ansible： 配置管理工具 Helm: K8S 资源  Terraform 数据中心涉及的资源：
+ Block Storage Resources Compute Resources DNS Resources Identity Resources Images resources Networking Resources Load Balancer Resources Firewall Resources Object Storage Resources  通过Terraform描述基础设施，包括网关，虚拟机，DNS和防火墙。Terraform基于code创建，修改和销毁相关资源。在声明式的语法外，Terraform也具备一定的可编程性，可以使用Terraform module实现类似ruby元编程的特性，在日渐复杂的基础设施中减少重复性的代码（DRY）。</description>
     </item>
     
     <item>

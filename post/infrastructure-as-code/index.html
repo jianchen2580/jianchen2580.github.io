@@ -1008,6 +1008,413 @@ section.main .content .markdown pre, section.main .content .markdown pre code {
     
     
 
+<p>基础设施即代码</p>
+
+<ul>
+<li>自动化基础设施provisioning和deployment process</li>
+<li>通过code描述而非大神的记忆</li>
+<li>Version Control/Git, Code的变更可追溯，可回滚</li>
+<li>Code Review和自动化测试部署</li>
+<li>透明度</li>
+</ul>
+
+<p>协作与共享</p>
+
+<ul>
+<li>代码可以通过GIT等版本管理工具在运维团队中共享和协作
+基础设施演进</li>
+<li>审计和跟踪基础设施的变化, 例如：AWS Security Group／Firewall, AMI/image
+自动化</li>
+<li>自动化所有可变更的操作</li>
+</ul>
+
+<p>三个阶段：</p>
+
+<ul>
+<li>Write：INFRASTRUCTURE AS CODE</li>
+<li>Review: Review changes before applying</li>
+<li>Apply: REPRODUCIBLE INFRASTRUCTURE</li>
+</ul>
+
+<p>基础设施即代码的实践涉及的tools：</p>
+
+<ul>
+<li>Terraform：数据中心provision</li>
+<li>Ansible： 配置管理工具</li>
+<li>Helm: K8S 资源</li>
+</ul>
+
+<h1 id="terraform">Terraform</h1>
+
+<p>数据中心涉及的资源：</p>
+
+<ul>
+<li>Block Storage Resources</li>
+<li>Compute Resources</li>
+<li>DNS Resources</li>
+<li>Identity Resources</li>
+<li>Images resources</li>
+<li>Networking Resources</li>
+<li>Load Balancer Resources</li>
+<li>Firewall Resources</li>
+<li>Object Storage Resources</li>
+</ul>
+
+<p>通过Terraform描述基础设施，包括网关，虚拟机，DNS和防火墙。Terraform基于code创建，修改和销毁相关资源。在声明式的语法外，Terraform也具备一定的可编程性，可以使用Terraform module实现类似ruby元编程的特性，在日渐复杂的基础设施中减少重复性的代码（DRY）。</p>
+
+<p>Terraform工作流</p>
+
+<ul>
+<li>构建可重复使用的module</li>
+<li>使用Terraform provision基础设施</li>
+<li>Github PR - Terraform配置更改</li>
+<li>Code Review</li>
+<li>Jenkins／CI 部署</li>
+</ul>
+
+<p><strong>个人建议</strong></p>
+
+<p>通过不同Dir隔离Stage／Prod环境</p>
+
+<pre><code>stage
+  └ main.tf
+  └ vars.tf
+  └ outputs.tf
+prod
+  └ main.tf
+  └ vars.tf
+  └ outputs.tf
+</code></pre>
+
+<p>隔离Stage／Prod的.tfstate</p>
+
+<p>.tfstate应该位于S3 bucket而不是Git Repo（个人开发测试阶段其实也可以放到本地），每次apply变更（或者回滚）的时候，保证组内的其他成员都能获取更新后的tfstate。</p>
+
+<p><strong>坑</strong>：Terraform不支持lock，多人同时apply可能会覆盖（放到Jenkins能保证同一时间只有一个apply执行）。</p>
+
+<h2 id="k8s相关的aws资源">K8S相关的AWS资源</h2>
+
+<p>VPC和Networking layer</p>
+
+<p>这里以定义单一subnet和单一Internet Gateway为例</p>
+
+<pre><code>resource &quot;aws_vpc&quot; &quot;kubernetes&quot; {
+  cidr_block = &quot;10.43.0.0/16&quot;
+  enable_dns_hostnames = true
+}
+resource &quot;aws_subnet&quot; &quot;kubernetes&quot; {
+  vpc_id = &quot;${aws_vpc.kubernetes.id}&quot;
+  cidr_block = &quot;10.43.0.0/16&quot;
+  availability_zone = &quot;us-east-1a&quot;
+}
+</code></pre>
+
+<p>创建Internet Gateway并支持outbound traffic</p>
+
+<pre><code>resource &quot;aws_internet_gateway&quot; &quot;gw&quot; {
+  vpc_id = &quot;${aws_vpc.kubernetes.id}&quot;
+}
+resource &quot;aws_route_table&quot; &quot;kubernetes&quot; {
+    vpc_id = &quot;${aws_vpc.kubernetes.id}&quot;
+    route {
+      cidr_block = &quot;0.0.0.0/0&quot;
+      gateway_id = &quot;${aws_internet_gateway.gw.id}&quot;
+    }
+}
+resource &quot;aws_route_table_association&quot; &quot;kubernetes&quot; {
+  subnet_id = &quot;${aws_subnet.kubernetes.id}&quot;
+  route_table_id = &quot;${aws_route_table.kubernetes.id}&quot;
+}
+</code></pre>
+
+<p>注入SSH Key-pair</p>
+
+<pre><code>resource &quot;aws_key_pair&quot; &quot;default_keypair&quot; {
+  key_name = &quot;my-keypair&quot;
+  public_key = &quot;ssh-rsa AA....zzz&quot;
+}
+</code></pre>
+
+<p>创建 EC2 Instance</p>
+
+<pre><code>resource &quot;aws_instance&quot; &quot;etcd&quot; {
+    count = 3
+    ami = &quot;ami-1967056a&quot; // Unbuntu 16.04 LTS HVM
+    instance_type = &quot;t2.micro&quot;
+
+    subnet_id = &quot;${aws_subnet.kubernetes.id}&quot;
+    private_ip = &quot;${cidrhost(&quot;10.43.0.0/16&quot;, 10 + count.index)}&quot;
+    associate_public_ip_address = true
+
+    availability_zone = &quot;us-east-1a&quot;
+    vpc_security_group_ids = [&quot;${aws_security_group.kubernetes.id}&quot;]
+    key_name = &quot;my-keypair&quot;
+}
+</code></pre>
+
+<p>创建 IAM Role</p>
+
+<pre><code>resource &quot;aws_iam_role&quot; &quot;kubernetes&quot; {
+  name = &quot;kubernetes&quot;
+  assume_role_policy = &lt;&lt;EOF
+{
+  &quot;Version&quot;: &quot;2012-10-17&quot;,
+  &quot;Statement&quot;: [ { &quot;Effect&quot;: &quot;Allow&quot;, &quot;Principal&quot;: { &quot;Service&quot;: &quot;ec2.amazonaws.com&quot; }, &quot;Action&quot;: &quot;sts:AssumeRole&quot; } ]
+}
+EOF
+}
+
+resource &quot;aws_iam_role_policy&quot; &quot;kubernetes&quot; {
+  name = &quot;kubernetes&quot;
+  role = &quot;${aws_iam_role.kubernetes.id}&quot;
+  policy = &lt;&lt;EOF
+{
+  &quot;Version&quot;: &quot;2012-10-17&quot;,
+  &quot;Statement&quot;: [
+    { &quot;Action&quot; : [&quot;ec2:*&quot;], &quot;Effect&quot;: &quot;Allow&quot;, &quot;Resource&quot;: [&quot;*&quot;] },
+    { &quot;Action&quot; : [&quot;elasticloadbalancing:*&quot;], &quot;Effect&quot;: &quot;Allow&quot;, &quot;Resource&quot;: [&quot;*&quot;] },
+    { &quot;Action&quot;: &quot;route53:*&quot;, &quot;Effect&quot;: &quot;Allow&quot;,  &quot;Resource&quot;: [&quot;*&quot;] },
+    { &quot;Action&quot;: &quot;ecr:*&quot;, &quot;Effect&quot;: &quot;Allow&quot;, &quot;Resource&quot;: &quot;*&quot; }
+  ]
+}
+EOF
+}
+
+resource  &quot;aws_iam_instance_profile&quot; &quot;kubernetes&quot; {
+ name = &quot;kubernetes&quot;
+ roles = [&quot;${aws_iam_role.kubernetes.name}&quot;]
+}
+</code></pre>
+
+<p>Load Balancer for Kubernetes API （通过AWS ELB暴露 Kubernetes API , AWS ELB 自带health check）</p>
+
+<pre><code>resource &quot;aws_elb&quot; &quot;kubernetes_api&quot; {
+    name = &quot;kube-api&quot;
+    instances = [&quot;${aws_instance.controller.*.id}&quot;]
+    subnets = [&quot;${aws_subnet.kubernetes.id}&quot;]
+    cross_zone_load_balancing = false
+
+
+    security_groups = [&quot;${aws_security_group.kubernetes_api.id}&quot;]
+
+
+    listener {
+      lb_port = 6443
+      instance_port = 6443
+      lb_protocol = &quot;TCP&quot;
+      instance_protocol = &quot;TCP&quot;
+    }
+
+
+    health_check {
+      healthy_threshold = 2
+      unhealthy_threshold = 2
+      timeout = 15
+      target = &quot;HTTP:8080/healthz&quot;
+      interval = 30
+    }
+}
+</code></pre>
+
+<p>AWS Security Group 配置</p>
+
+<pre><code>resource &quot;aws_security_group&quot; &quot;kubernetes&quot; {
+  vpc_id = &quot;${aws_vpc.kubernetes.id}&quot;
+  name = &quot;kubernetes&quot;
+
+
+  # Allow all outbound
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = &quot;-1&quot;
+    cidr_blocks = [&quot;0.0.0.0/0&quot;]
+  }
+
+
+  # Allow all internal
+  ingress {
+    from_port = 0
+    to_port = 0
+    protocol = &quot;-1&quot;
+    self = true
+  }
+
+
+  # Allow all traffic from the API ELB
+  ingress {
+    from_port = 0
+    to_port = 0
+    protocol = &quot;-1&quot;
+    security_groups = [&quot;${aws_security_group.kubernetes_api.id}&quot;]
+  }
+
+
+  # Allow all traffic from control host IP
+  ingress {
+    from_port = 0
+    to_port = 0
+    protocol = &quot;-1&quot;
+    cidr_blocks = [&quot;${var.control_cidr}&quot;]
+  }
+}
+
+
+resource &quot;aws_security_group&quot; &quot;kubernetes_api&quot; {
+  vpc_id = &quot;${aws_vpc.kubernetes.id}&quot;
+  name = &quot;kubernetes-api&quot;
+
+
+  # Allow inbound traffic to the port used by Kubernetes API HTTPS
+  ingress {
+    from_port = 6443
+    to_port = 6443
+    protocol = &quot;TCP&quot;
+    cidr_blocks = [&quot;${var.control_cidr}&quot;]
+  }
+
+
+  # Allow all outbound traffic
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = &quot;-1&quot;
+    cidr_blocks = [&quot;0.0.0.0/0&quot;]
+  }
+}
+</code></pre>
+
+<h2 id="terraform-provisoner">Terraform Provisoner</h2>
+
+<p>Provisoner，例如remote-exec
+Install Python 2.X for Ansible: Ubuntu 16.04只预装了Python 3，为了正常运行Ansible playbook需要额外安装python2，这个可以通过Terraform的remote-exec provisioner实现，也可以通过Ansible raw module实现</p>
+
+<h2 id="terraform优势">Terraform优势</h2>
+
+<p>只需用代码描述基础设施。通过git版本控制及写协作。
+每次应用变更前review增量改动（diff）</p>
+
+<pre><code>terraform plan 
+</code></pre>
+
+<p>然后应用变更。了解基础架构的实际情况。</p>
+
+<pre><code>terraform apply 
+</code></pre>
+
+<p>整个数据中心基础设施的的维护，可复制，可审计且处于git的版本控制之下， 每一步的变更都是透明的</p>
+
+<p>Terraform局限性：
+没有回滚功能，如果apply的时候和预期有出入需要回滚，只能先回滚code然后re-deploy.</p>
+
+<h1 id="ansible-kops安装k8s">Ansible + kops安装K8S</h1>
+
+<p>包括：</p>
+
+<ul>
+<li>Bootstrap Ansible/Install Python</li>
+<li>Configure Kubectl 在本地机器</li>
+<li>运行测试</li>
+</ul>
+
+<p>Ansible + kops</p>
+
+<ul>
+<li>Install kubectl到本地</li>
+<li>Install kops到本地</li>
+<li>创建存储kops状态的S3 bucket</li>
+<li>Install K8S 集群</li>
+<li>创建AWS Lambda function 给Instances打tag</li>
+<li>Install add-ons，dashboard/Heapster／Storage Class</li>
+<li>…</li>
+</ul>
+
+<h1 id="helm">Helm</h1>
+
+<p>我们最早使用bash来生成k8s的depleoy，service, ingress&hellip;</p>
+
+<pre><code>#!/bin/bash
+export NAMESPACE='prod'
+export APP=‘app1’ 
+cat &lt;&lt;EOF &gt; &quot;$PWD/$EU_NAME_OF_DEPLOYMENT&quot;
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+…
+EOF
+kubectl --context=&quot;$US_CLUSTER&quot; apply -f &quot;$PWD/$US_NAME_OF_DEPLOYMENT&quot;
+</code></pre>
+
+<p>然后过度到Ansible: Ansible Roles + Jinjia2 Template</p>
+
+<pre><code>├── prometheus
+│   ├── README.md
+│   ├── defaults
+│   │   └── main.yml
+│   ├── handlers
+│   │   └── main.yml
+│   ├── meta
+│   │   └── main.yml
+│   ├── tasks
+│   │   └── main.yml
+│   ├── tests
+│   │   ├── inventory
+│   │   └── test.yml
+│   └── vars
+│       └── main.yml
+</code></pre>
+
+<p>然后是Helm</p>
+
+<pre><code>prometheus
+├── Chart.yaml
+├── README.md
+├── templates
+│   ├── NOTES.txt
+│   ├── _helpers.tpl
+│   ├── alertmanager-clusterrolebinding.yaml
+│   ├── …
+│   └── server-serviceaccount.yaml
+└── values.yaml
+</code></pre>
+
+<h1 id="helm-1">Helm</h1>
+
+<p>基本组件：</p>
+
+<ul>
+<li>Chart：包含了运行一个应用所需要的工具、资源定义等，还可能包含 Kubernetes 集群中的服务定义</li>
+<li>Release: 运行 Chart 的一个实例。 Chart 每次安装都会创建一个新的 release。</li>
+<li>Repository：用于存放和共享 Chart 的Repo</li>
+</ul>
+
+<h2 id="hooks">Hooks</h2>
+
+<p>Helm的hook机制可以在release的某个点介入。例如：</p>
+
+<ul>
+<li>预先生成ConfigMap和Secret</li>
+<li>执行一些数据库备份以及恢复之类的Job</li>
+</ul>
+
+<p>Hooks包括：</p>
+
+<ul>
+<li>pre-install: Executes after templates are rendered, but before any resources are created in Kubernetes.</li>
+<li>post-install: Executes after all resources are loaded into Kubernetes</li>
+<li>pre-delete: Executes on a deletion request before any resources are deleted from Kubernetes.</li>
+<li>post-delete: Executes on a deletion request after all of the release’s resources have been deleted.</li>
+<li>pre-upgrade: Executes on an upgrade request after templates are rendered, but before any resources are loaded into Kubernetes (e.g. before a Kubernetes apply operation).</li>
+<li>post-upgrade: Executes on an upgrade after all resources have been upgraded.</li>
+<li>pre-rollback: Executes on a rollback request after templates are rendered, but before any resources have been rolled back.</li>
+<li>post-rollback: Executes on a rollback request after all resources have been modified.</li>
+</ul>
+
+<h2 id="helm的坑">Helm的坑</h2>
+
+<p>时常碰到一些小Bug，比如helm install 有时没能同步生成release name (已修复)，好在目前项目比较活跃。</p>
+
+
             </div>
         </div>
     </div>
